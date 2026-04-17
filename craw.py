@@ -85,11 +85,14 @@ class Powershell(WithInterProcessCommunication):
         )
 
     def send_line(self, line: str) -> None:
+        if debug(): print(f"-> {line}")
         print(line, file=self.outfile)
         self.outfile.flush()
 
     def receive_line(self) -> str:
-        return self.infile.readline().strip("\r\n")
+        line = self.infile.readline().strip("\r\n")
+        if debug(): print(f"<- {line}")
+        return line
 
     def exit(self) -> None:
         self.send_line("exit")
@@ -99,13 +102,14 @@ class Powershell(WithInterProcessCommunication):
         self.send_line("echo $?")
 
     def send_echo_no_newline(self, content: str) -> None:
+        if debug(): print(f"+> {content}")
         self.send_line(f"echo {content}")
 
     def is_ok_error_code(self, code: str) -> bool:
         return code == "True"
 
     def set_env_var(self, name: str, value: str) -> None:
-        self.send_line(f'${k}="{v}"')
+        self.send_line(f'${name}="{value}"')
 
 
 class Cmd(WithInterProcessCommunication):
@@ -173,7 +177,17 @@ class Cram:
         mark = self.mark_(command)
         out = self.receive_until_mark_(mark)
         code = out[-1]
-        out = out[:-2]  # discard error code and it's echo command
+        out = out[:-2]  # discard error code and its echo command
+        if type(self.shell) is Cmd: # Special case for the cmd.exe shell:
+            # Before outputing the prompt for the next command...
+            # (Outputing the error code, which was collected just above)
+            # ... it appends a CRLF after the previous program output.
+            lastLine = out[-1]
+            if lastLine == "":
+                out = out[:-1]  # discard that last blank line, NOT part of the program output
+            else:
+                # TODO (feature parity) Record that absence of CRLF, for later testing with (no-eol)
+                if debug(): print("# Warning: The last line did not end with a CRLF")
         if not self.shell.is_ok_error_code(code):
             out.append(f"[{code}]")
         return out

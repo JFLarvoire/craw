@@ -387,7 +387,7 @@ def run_test(options: Options, test_file: str) -> TestResult:
 def main(options: Options, test_files: list[str]) -> None:
     failures: list[tuple[str, TestResult]] = []
     if debug():
-        print("# Shell = {options.shell.__name__}")
+        print(f"# Shell = {options.shell.__name__}")
     for test_file in test_files:
         result = run_test(options, test_file)
         if result.success():

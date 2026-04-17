@@ -9,6 +9,17 @@ from random import randint
 from typing import Callable, Never, Protocol
 
 
+# Get/Set the debug mode
+def debug(*args) -> bool:
+   global _debug
+   try:
+       _debug
+   except NameError: 
+       _debug = False
+   for arg in args: _debug = arg
+   return _debug
+
+
 class ShellProtocol(Protocol):
     def send_line(self, line: str) -> None:
         raise NotImplementedError()
@@ -93,6 +104,9 @@ class Powershell(WithInterProcessCommunication):
     def is_ok_error_code(self, code: str) -> bool:
         return code == "True"
 
+    def set_env_var(self, name: str, value: str) -> None:
+        self.send_line(f'${k}="{v}"')
+
 
 class Cmd(WithInterProcessCommunication):
     def __init__(self, workdir: str, env: dict[str, str]):
@@ -104,14 +118,17 @@ class Cmd(WithInterProcessCommunication):
 
     def send_line(self, line: str) -> None:
         escaped = line.replace('"', '"') if line.startswith("echo") else line
-        print(f"cmd /c {escaped}", file=self.outfile)
+        if debug(): print(f"-> {escaped}")
+        print(f"{escaped}", file=self.outfile)
         self.outfile.flush()
 
     def receive_line(self) -> str:
         res = self.infile.readline().strip("\r\n")
+        if debug(): print(f"<- {res}")
         return res
 
     def exit(self) -> None:
+        if debug(): print("-> exit")
         print("exit", file=self.outfile)
         self.child.wait()
 
@@ -121,10 +138,14 @@ class Cmd(WithInterProcessCommunication):
     def send_echo_no_newline(self, content: str) -> None:
         # https://stackoverflow.com/questions/7105433/windows-batch-echo-without-new-line#comment8520146_7105690
         # avoids using echo which sends an extra newline
+        if debug(): print(f"+> {content}")
         print(f"<nul set/p ={content}", file=self.outfile)
 
     def is_ok_error_code(self, code: str) -> bool:
         return code == "0"
+
+    def set_env_var(self, name: str, value: str) -> None:
+        self.send_line(f'set "{name}={value}"')
 
 
 class Cram:
@@ -136,7 +157,7 @@ class Cram:
 
         # set variables, which differs from env variables in powershell
         for k, v in variables.items():
-            self.shell.send_line(f'${k}="{v}"')
+            self.shell.set_env_var(k, v)
 
         mark = self.mark_("")
         self.receive_until_mark_(mark)
@@ -288,6 +309,9 @@ class Options:
         for i, arg in enumerate(args):
             if arg == "--interactive" or arg == "-i":
                 self.interactive = True
+            elif arg == "--debug" or arg == "-d":
+                print("# Debug on")
+                debug(True)
             elif arg == "--yes" or arg == "-y":
                 self.yes = True
             elif arg == "--promote":
@@ -295,9 +319,9 @@ class Options:
                 self.interactive = True
             elif arg == "--keep-tmpdir":
                 self.keep_tmpdir = True
-            elif arg == "--shell=powershell":
+            elif arg == "--shell=powershell" or arg == "--ps":
                 self.shell = Powershell
-            elif arg == "--shell=cmd":
+            elif arg == "--shell=cmd" or arg == "--cmd":
                 self.shell = Cmd
             elif arg == "--help" or arg == "-h":
                 self.help = True
@@ -362,6 +386,8 @@ def run_test(options: Options, test_file: str) -> TestResult:
 
 def main(options: Options, test_files: list[str]) -> None:
     failures: list[tuple[str, TestResult]] = []
+    if debug():
+        print("# Shell = {options.shell.__name__}")
     for test_file in test_files:
         result = run_test(options, test_file)
         if result.success():
